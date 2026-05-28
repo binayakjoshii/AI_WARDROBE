@@ -1,0 +1,342 @@
+[
+  {
+    "set_id": "0",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_0",
+        "name": "casual grey cotton crewneck",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_0",
+        "name": "khaki slim fit chinos",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "1",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_1",
+        "name": "white breathable linen button-down shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_1",
+        "name": "athletic breathable black joggers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "2",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_2",
+        "name": "casual grey cotton crewneck",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_2",
+        "name": "athletic breathable black joggers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "3",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_3",
+        "name": "vintage distressed denim jacket",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_3",
+        "name": "classic tan corduroy pants",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "4",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_4",
+        "name": "casual grey cotton crewneck",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_4",
+        "name": "formal charcoal grey wool trousers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "5",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_5",
+        "name": "oversized graphic anime hoodie",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_5",
+        "name": "athletic breathable black joggers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "6",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_6",
+        "name": "vintage distressed denim jacket",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_6",
+        "name": "black cargo streetwear pants",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "7",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_7",
+        "name": "dark navy blue silk blouse",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_7",
+        "name": "athletic breathable black joggers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "8",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_8",
+        "name": "premium minimalist black cotton t-shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_8",
+        "name": "dark wash raw denim jeans",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "9",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_9",
+        "name": "formal slim fit light blue dress shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_9",
+        "name": "athletic breathable black joggers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "10",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_10",
+        "name": "oversized graphic anime hoodie",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_10",
+        "name": "classic tan corduroy pants",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "11",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_11",
+        "name": "heavy cable knit burgundy wool sweater",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_11",
+        "name": "light wash streetwear denim jeans",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "12",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_12",
+        "name": "premium minimalist black cotton t-shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_12",
+        "name": "black cargo streetwear pants",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "13",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_13",
+        "name": "oversized graphic anime hoodie",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_13",
+        "name": "formal charcoal grey wool trousers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "14",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_14",
+        "name": "dark navy blue silk blouse",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_14",
+        "name": "light wash streetwear denim jeans",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "15",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_15",
+        "name": "premium minimalist black cotton t-shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_15",
+        "name": "khaki slim fit chinos",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "16",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_16",
+        "name": "white breathable linen button-down shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_16",
+        "name": "light wash streetwear denim jeans",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "17",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_17",
+        "name": "oversized graphic anime hoodie",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_17",
+        "name": "dark wash raw denim jeans",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "18",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_18",
+        "name": "white breathable linen button-down shirt",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_18",
+        "name": "athletic breathable black joggers",
+        "categoryid": "bottoms"
+      }
+    ]
+  },
+  {
+    "set_id": "19",
+    "items": [
+      {
+        "index": 1,
+        "item_id": "t_19",
+        "name": "dark navy blue silk blouse",
+        "categoryid": "tops"
+      },
+      {
+        "index": 2,
+        "item_id": "b_19",
+        "name": "khaki slim fit chinos",
+        "categoryid": "bottoms"
+      }
+    ]
+  }
+]
