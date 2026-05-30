@@ -3,6 +3,8 @@ import io
 import json
 import time
 import requests
+import joblib
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
@@ -10,6 +12,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 from typing import Literal
 from groq import Groq
+from sentence_transformers import SentenceTransformer
 
 app = FastAPI(title="Smart Wardrobe AI Backend")
 
@@ -20,57 +23,189 @@ SUPABASE_KEY = os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 
 if not all([SUPABASE_URL, SUPABASE_KEY, GROQ_KEY]):
-    raise ValueError("Missing variables! Double-check your .env configuration file formatting (GROQ_API_KEY).")
+    raise ValueError("Missing variables! Double-check your .env configuration file.")
 
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 groq_client = Groq(api_key=GROQ_KEY)
 
 # ==========================================
-# MASTER MENSWEAR FASHION DATASET (Context-Aware Expansion)
+# 🧠 LOAD CUSTOM NEURAL NETWORK (The Brain)
+# ==========================================
+ML_AVAILABLE = False
+try:
+    print("Loading Custom ML Model into RAM...")
+    model_bundle = joblib.load("models/polyvore_weather_model.pkl")
+    mlp_model = model_bundle["mlp"]
+    scaler = model_bundle["scaler"]
+    embedder = SentenceTransformer(model_bundle["embed_model_name"])
+    WARMTH_MAP = model_bundle["warmth_keywords"]
+    ML_AVAILABLE = True
+    print("✅ AI Stylist Model Loaded Successfully!")
+except Exception as e:
+    print(f"⚠️ ML Model not found or failed to load. Using basic rule fallback. Error: {e}")
+
+def get_warmth_score(text: str) -> float:
+    if not ML_AVAILABLE: return 0.5
+    text = text.lower()
+    scores = [v for k, v in WARMTH_MAP.items() if k in text]
+    return float(np.mean(scores)) if scores else 0.40
+
+# ==========================================
+# MASTER MENSWEAR FASHION DATASET (14 Archetypes)
 # ==========================================
 MASTER_FASHION_RULES = [
     {
+        "style_archetype": "Everyday Casual / College",
+        "keywords": ["class", "college", "campus", "friends", "shopping", "day", "casual", "lecture"],
+        "ideal_temp_range": [15, 35],
+        "components": {
+            "top": {"category": "tops", "subcategory": "T-Shirt or Henley", "colors": ["Black", "White", "Grey", "Navy"]},
+            "bottom": {"category": "bottoms", "subcategory": "Jeans or Casual Chinos", "colors": ["Blue", "Black"]},
+            "layer": {"category": "outerwear", "subcategory": "Flannel or Zip Hoodie", "colors": ["Red", "Grey", "Navy"]},
+            "footwear": {"category": "shoes", "subcategory": "Everyday Sneakers", "colors": ["White", "Black"]}
+        }
+    },
+    {
+        "style_archetype": "Smart Casual / Office",
+        "keywords": ["office", "work", "meeting", "business casual", "presentation", "colleagues"],
+        "ideal_temp_range": [18, 35],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Polo or Oxford Shirt", "colors": ["White", "Light Blue", "Navy"]},
+            "bottom": {"category": "bottoms", "subcategory": "Chinos or Trousers", "colors": ["Navy", "Khaki", "Grey"]},
+            "layer": {"category": "outerwear", "subcategory": "Quarter-Zip or Light Sweater", "colors": ["Navy", "Grey"]},
+            "footwear": {"category": "shoes", "subcategory": "Clean Sneakers or Loafers", "colors": ["White", "Brown"]}
+        }
+    },
+    {
         "style_archetype": "Evening Date Night / Formal",
-        "keywords": ["date", "dinner", "evening", "romantic", "night out", "fancy", "restaurant", "wedding", "formal", "office"],
+        "keywords": ["date", "dinner", "evening", "romantic", "night out", "fancy", "restaurant", "anniversary"],
         "ideal_temp_range": [10, 30],
         "components": {
-            "top": {"category": "tops", "subcategory": "Button-Down or Dress Shirt", "colors": ["Black", "White", "Navy", "Burgundy", "Blue", "Maroon"]},
-            "bottom": {"category": "bottoms", "subcategory": "Chinos or Dress Pants", "colors": ["Black", "Navy", "Grey", "Khaki"]},
-            "layer": {"category": "outerwear", "subcategory": "Blazer or Jacket", "colors": ["Black", "Navy", "Grey"]},
-            "footwear": {"category": "shoes", "subcategory": "Dress Shoes or Clean Loafers", "colors": ["Black", "Brown"]}
+            "top": {"category": "tops", "subcategory": "Button-Down or Dress Shirt", "colors": ["Black", "White", "Navy", "Burgundy"]},
+            "bottom": {"category": "bottoms", "subcategory": "Chinos or Dress Pants", "colors": ["Black", "Navy", "Grey"]},
+            "layer": {"category": "outerwear", "subcategory": "Blazer or Jacket", "colors": ["Black", "Navy"]},
+            "footwear": {"category": "shoes", "subcategory": "Dress Shoes or Loafers", "colors": ["Black", "Brown"]}
+        }
+    },
+    {
+        "style_archetype": "Business Professional / Boardroom",
+        "keywords": ["interview", "boardroom", "corporate", "strict office", "formal meeting"],
+        "ideal_temp_range": [15, 30],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Dress Shirt", "colors": ["White", "Light Blue"]},
+            "bottom": {"category": "bottoms", "subcategory": "Suit Trousers", "colors": ["Navy", "Charcoal", "Black"]},
+            "layer": {"category": "outerwear", "subcategory": "Suit Jacket", "colors": ["Navy", "Charcoal", "Black"]},
+            "footwear": {"category": "shoes", "subcategory": "Oxfords or Dress Shoes", "colors": ["Black", "Dark Brown"]}
+        }
+    },
+    {
+        "style_archetype": "Streetwear / Hype",
+        "keywords": ["street", "festival", "concert", "hype", "skate", "city", "downtown", "kicks"],
+        "ideal_temp_range": [15, 35],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Graphic T-Shirt or Oversized Tee", "colors": ["Black", "White", "Vintage Wash"]},
+            "bottom": {"category": "bottoms", "subcategory": "Cargo Pants or Baggy Jeans", "colors": ["Olive", "Black", "Faded Blue"]},
+            "layer": {"category": "outerwear", "subcategory": "Bomber or Denim Jacket", "colors": ["Black", "Olive", "Blue"]},
+            "footwear": {"category": "shoes", "subcategory": "Statement Sneakers", "colors": ["Red", "Blue", "Multi", "White"]}
+        }
+    },
+    {
+        "style_archetype": "Activewear / Gym",
+        "keywords": ["gym", "workout", "run", "sports", "training", "exercise", "sweat", "fitness", "basketball", "soccer"],
+        "ideal_temp_range": [5, 45],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Athletic T-Shirt or Tank", "colors": ["Black", "White", "Grey", "Neon"]},
+            "bottom": {"category": "bottoms", "subcategory": "Gym Shorts or Joggers", "colors": ["Black", "Grey", "Navy"]},
+            "layer": {"category": "outerwear", "subcategory": "Windbreaker", "colors": ["Black", "Grey"]},
+            "footwear": {"category": "shoes", "subcategory": "Running Shoes", "colors": []} 
+        }
+    },
+    {
+        "style_archetype": "Loungewear / Cozy",
+        "keywords": ["home", "lazy", "couch", "groceries", "relax", "chill", "errands", "study", "dorm", "movie"],
+        "ideal_temp_range": [15, 30],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Comfortable Oversized Tee", "colors": ["Grey", "White", "Earth Tones"]},
+            "bottom": {"category": "bottoms", "subcategory": "Sweatpants", "colors": ["Grey", "Black"]},
+            "layer": {"category": "outerwear", "subcategory": "Hoodie", "colors": ["Grey", "Black"]},
+            "footwear": {"category": "shoes", "subcategory": "Slides or Crocs", "colors": []}
         }
     },
     {
         "style_archetype": "Summer Vacation / Resort",
-        "keywords": ["vacation", "beach", "summer", "resort", "holiday", "trip", "tropical", "pool", "goa"],
+        "keywords": ["vacation", "beach", "summer", "resort", "holiday", "tropical", "pool", "goa", "cruise"],
         "ideal_temp_range": [25, 45],
         "components": {
-            "top": {"category": "tops", "subcategory": "Linen Shirt or Polo", "colors": ["White", "Light Blue", "Beige", "Yellow", "Pink"]},
-            "bottom": {"category": "bottoms", "subcategory": "Shorts", "colors": ["Khaki", "Navy", "White", "Olive", "Beige"]},
+            "top": {"category": "tops", "subcategory": "Linen Shirt or Polo", "colors": ["White", "Light Blue", "Beige", "Yellow"]},
+            "bottom": {"category": "bottoms", "subcategory": "Shorts", "colors": ["Khaki", "Navy", "White", "Olive"]},
             "layer": {"category": "outerwear", "subcategory": "None", "colors": []},
             "footwear": {"category": "shoes", "subcategory": "Sandals or Loafers", "colors": ["Brown", "White"]}
         }
     },
     {
-        "style_archetype": "Streetwear Essentials (Everyday)",
-        "keywords": ["street", "walk", "festival", "gym", "active", "casual", "friends", "shopping", "day"],
-        "ideal_temp_range": [15, 45],
+        "style_archetype": "Winter / Heavy Cold",
+        "keywords": ["winter", "cold", "snow", "freezing", "chilly", "ice", "blizzard"],
+        "ideal_temp_range": [-20, 10],
         "components": {
-            "top": {"category": "tops", "subcategory": "T-Shirt", "colors": ["Black", "White", "Grey", "Burgundy", "Olive"]},
-            "bottom": {"category": "bottoms", "subcategory": "Cargo Pants or Jeans", "colors": ["Olive", "Black", "Grey", "Blue", "Beige"]},
-            "layer": {"category": "outerwear", "subcategory": "None", "colors": []},
-            "footwear": {"category": "shoes", "subcategory": "Sneakers", "colors": ["White", "Black", "Red"]}
+            "top": {"category": "tops", "subcategory": "Heavy Sweater or Turtleneck", "colors": ["Black", "Grey", "Navy", "Cream"]},
+            "bottom": {"category": "bottoms", "subcategory": "Heavy Jeans or Corduroys", "colors": ["Black", "Dark Blue"]},
+            "layer": {"category": "outerwear", "subcategory": "Overcoat or Puffer Jacket", "colors": ["Black", "Navy", "Olive"]},
+            "footwear": {"category": "shoes", "subcategory": "Boots", "colors": ["Black", "Brown"]}
         }
     },
     {
-        "style_archetype": "Winter / Cold Weather Layering",
-        "keywords": ["winter", "cold", "snow", "freezing", "chilly"],
-        "ideal_temp_range": [-10, 14],
+        "style_archetype": "Rainy / Monsoon",
+        "keywords": ["rain", "storm", "wet", "monsoon", "umbrella", "puddles", "pouring"],
+        "ideal_temp_range": [10, 30],
         "components": {
-            "top": {"category": "tops", "subcategory": "Sweater or Hoodie", "colors": ["Black", "Grey", "Navy", "Burgundy", "White"]},
-            "bottom": {"category": "bottoms", "subcategory": "Heavy Jeans or Chinos", "colors": ["Black", "Dark Blue", "Grey"]},
-            "layer": {"category": "outerwear", "subcategory": "Overcoat or Puffer Jacket", "colors": ["Black", "Navy", "Olive", "Grey"]},
-            "footwear": {"category": "shoes", "subcategory": "Boots", "colors": ["Black", "Brown"]}
+            "top": {"category": "tops", "subcategory": "T-Shirt", "colors": ["Black", "Navy", "Dark Grey"]},
+            "bottom": {"category": "bottoms", "subcategory": "Synthetic Pants or Dark Jeans", "colors": ["Black", "Navy"]},
+            "layer": {"category": "outerwear", "subcategory": "Raincoat or Water-Resistant Shell", "colors": ["Yellow", "Black", "Olive"]},
+            "footwear": {"category": "shoes", "subcategory": "Waterproof Boots or Beaters", "colors": ["Black"]}
+        }
+    },
+    {
+        "style_archetype": "Creative / Artistic",
+        "keywords": ["art", "gallery", "exhibition", "museum", "cafe", "poetry", "creative", "design"],
+        "ideal_temp_range": [15, 30],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Turtleneck or Flowy Shirt", "colors": ["Black", "Mustard", "Cream", "Rust"]},
+            "bottom": {"category": "bottoms", "subcategory": "Wide Leg Trousers", "colors": ["Black", "Brown", "Olive"]},
+            "layer": {"category": "outerwear", "subcategory": "Cardigan or Chore Coat", "colors": ["Earth Tones", "Navy"]},
+            "footwear": {"category": "shoes", "subcategory": "Chunky Loafers or Boots", "colors": ["Black", "Oxblood"]}
+        }
+    },
+    {
+        "style_archetype": "Wedding Guest (Summer/Day)",
+        "keywords": ["wedding guest", "reception", "day wedding"],
+        "ideal_temp_range": [20, 35],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Dress Shirt", "colors": ["White", "Light Blue", "Pink"]},
+            "bottom": {"category": "bottoms", "subcategory": "Suit Trousers", "colors": ["Navy", "Light Grey", "Tan"]},
+            "layer": {"category": "outerwear", "subcategory": "Suit Jacket", "colors": ["Navy", "Light Grey", "Tan"]},
+            "footwear": {"category": "shoes", "subcategory": "Dress Shoes", "colors": ["Brown", "Tan"]}
+        }
+    },
+    {
+        "style_archetype": "Travel / Airport",
+        "keywords": ["flight", "airport", "travel", "plane", "flying", "roadtrip"],
+        "ideal_temp_range": [15, 25],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Comfortable T-Shirt", "colors": ["Black", "White", "Grey"]},
+            "bottom": {"category": "bottoms", "subcategory": "Joggers or Stretchy Chinos", "colors": ["Black", "Navy", "Grey"]},
+            "layer": {"category": "outerwear", "subcategory": "Zip-up Hoodie or Light Jacket", "colors": ["Black", "Grey"]},
+            "footwear": {"category": "shoes", "subcategory": "Slip-on Sneakers", "colors": ["White", "Black"]}
+        }
+    },
+    {
+        "style_archetype": "Traditional / Cultural Event",
+        "keywords": ["festival", "diwali", "puja", "traditional", "ethnic", "indian wedding", "ceremony"],
+        "ideal_temp_range": [15, 40],
+        "components": {
+            "top": {"category": "tops", "subcategory": "Kurta or Ethnic Top", "colors": ["White", "Yellow", "Maroon", "Black"]},
+            "bottom": {"category": "bottoms", "subcategory": "Pajama or Chinos", "colors": ["White", "Black"]},
+            "layer": {"category": "outerwear", "subcategory": "Nehru Jacket", "colors": ["Contrasting Color"]},
+            "footwear": {"category": "shoes", "subcategory": "Sandals, Mojaris, or Loafers", "colors": ["Brown", "Black"]}
         }
     }
 ]
@@ -87,20 +222,15 @@ class RecommendRequest(BaseModel):
     current_temp: float = 28.0
     is_raining: bool = False
 
-class UpdateStatusRequest(BaseModel):
-    status: Literal["clean", "dirty"]
-
 # ==========================================
-# ENDPOINT 1: THE INGESTION PIPELINE
+# ENDPOINTS
 # ==========================================
 @app.post("/api/ingest")
 async def process_clothing_item(request: IngestRequest):
     try:
         from rembg import remove
-
         response = requests.get(request.imageUrl)
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to download image.")
+        if response.status_code != 200: raise HTTPException(status_code=400, detail="Failed to download image.")
         
         output_bytes = remove(response.content)
         processed_image = Image.open(io.BytesIO(output_bytes))
@@ -111,169 +241,122 @@ async def process_clothing_item(request: IngestRequest):
         file_name = f"processed_{os.path.basename(request.imageUrl).split('?')[0]}"
         storage_path = f"processed_wardrobe/{file_name}"
         
-        supabase_client.storage.from_("wardrobe").upload(
-            path=storage_path,
-            file=img_buffer.getvalue(),
-            file_options={"content-type": "image/png"}
-        )
-        
-        processed_url = supabase_client.storage.from_("wardrobe").get_public_url(storage_path)
-
-        return {
-            "success": True,
-            "processedImageUrl": processed_url
-        }
-
+        supabase_client.storage.from_("wardrobe").upload(path=storage_path, file=img_buffer.getvalue(), file_options={"content-type": "image/png"})
+        return {"success": True, "processedImageUrl": supabase_client.storage.from_("wardrobe").get_public_url(storage_path)}
     except Exception as e:
-        print(f"CRITICAL INGEST ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ==========================================
-# ENDPOINT 2: INTELLIGENT RECOMMENDATION ENGINE
-# ==========================================
+
 @app.post("/api/recommend")
 async def recommend_outfit(request: RecommendRequest):
     try:
         greetings = ["hi", "hello", "hey", "sup"]
         if request.prompt.lower().strip() in greetings:
-               return {
-            "success": True,
-            "recommendation": "Hello! I am Aura, your personal style consultant. What is the occasion you are dressing for today?",
-            "blueprint": {},
-            "meta": {"status": "greeting"}
-        }
-        # 1. Grab clean inventory
+            return {"success": True, "recommendation": "Hello! I am Aura. What is the occasion you are dressing for today?", "blueprint": {}, "meta": {"status": "greeting"}}
+
         db_response = supabase_client.table("clothing_items").select("*").eq("wear_status", "clean").execute()
         user_wardrobe = db_response.data if db_response.data else []
 
-        target_temp = request.current_temp
-        prompt_lower = request.prompt.lower()
-        weather_label = "Rainy/Stormy Context" if request.is_raining else "Standard Weather"
+        # 1. FIXED SCORING LOGIC (Keywords beat Temperature)
+        best_archetype = MASTER_FASHION_RULES[0] # Default to Casual
+        highest_score = 0 
         
-        # 2. CONTEXT SCORING
-        best_archetype = MASTER_FASHION_RULES[2] 
-        highest_score = -1
         for archetype in MASTER_FASHION_RULES:
             score = 0
-            low_t, high_t = archetype["ideal_temp_range"]
-            if low_t <= target_temp <= high_t: score += 1
+            if archetype["ideal_temp_range"][0] <= request.current_temp <= archetype["ideal_temp_range"][1]: 
+                score += 0.5 # Weather is a minor tie-breaker
             for kw in archetype.get("keywords", []):
-                if kw in prompt_lower: score += 5
+                if kw in request.prompt.lower(): 
+                    score += 5 # Keywords are the primary decider
             if score > highest_score:
                 highest_score = score
                 best_archetype = archetype
 
-        selected_archetype = best_archetype
         outfit_composition = {}
-        owned_items_data = []
-        missing_items_needed = []
-
-        # 3. MATCHING LOOP (Same logic preserved)
-        components = selected_archetype["components"]
-        for placement, structural_rule in components.items():
-            if structural_rule["subcategory"] == "None": continue
-            matched_user_item = None
-            rule_cat = structural_rule["category"].lower().strip()
-
-            for item in user_wardrobe:
-                db_cat = item.get("category", "").lower().strip()
-                is_top = db_cat in ["tops", "top", "shirt", "shirts"] and rule_cat == "tops"
-                is_bottom = db_cat in ["bottoms", "bottom", "pants", "jeans", "shorts"] and rule_cat == "bottoms"
-                is_shoes = db_cat in ["shoes", "shoe", "footwear"] and rule_cat == "shoes"
-                is_outerwear = db_cat in ["outerwear", "jacket", "layer"] and rule_cat == "outerwear"
-                
-                item_color = item.get("color_name", item.get("colorName", "")).strip().lower()
-                color_match = not structural_rule["colors"] or any(c.lower() in item_color or item_color in c.lower() for c in structural_rule["colors"])
-                
-                if (is_top or is_bottom or is_shoes or is_outerwear) and color_match:
-                    matched_user_item = item
-                    break
-
-            if matched_user_item:
-                outfit_composition[placement] = f"Your Owned {matched_user_item.get('color_name', 'Item').title()} {matched_user_item.get('subcategory', 'Item').title()}"
-                owned_items_data.append(matched_user_item)
-            else:
-                outfit_composition[placement] = f"[MISSING: {structural_rule['colors'][0] if structural_rule['colors'] else 'Neutral'} {structural_rule['subcategory']}]"
-                missing_items_needed.append(f"{structural_rule['colors'][0] if structural_rule['colors'] else 'Neutral'} {structural_rule['subcategory']}")
-
-        # 1. Prepare JSON with escaped braces to fix the f-string syntax error
-        outfit_blueprint_str = json.dumps(outfit_composition, indent=2)
-        blueprint_json = outfit_blueprint_str.replace("{", "{{").replace("}", "}}")
         
-        # 2. Dynamic Tone logic to prevent "Date Night" bias
-        request_context = request.prompt.lower()
-        tone = "sophisticated and romantic" if any(x in request_context for x in ["date", "dinner", "romantic", "fancy"]) else \
-               "sharp, professional, and composed" if any(x in request_context for x in ["office", "meeting", "work", "exam"]) else \
-               "preppy, academic, and practical" if any(x in request_context for x in ["college", "school", "campus", "study"]) else \
-               "relaxed, modern, and stylish"
+        # 2. MACHINE LEARNING EVALUATION
+        if ML_AVAILABLE and len(user_wardrobe) > 1:
+            tops = [item for item in user_wardrobe if item.get("category", "").lower() in ["tops", "top", "shirt"]]
+            bottoms = [item for item in user_wardrobe if item.get("category", "").lower() in ["bottoms", "bottom", "pants", "jeans"]]
+            
+            best_pair_score = -1
+            best_top, best_bottom = None, None
+            temp_norm = np.clip(request.current_temp, 5, 45) / 45.0
 
-        # 3. Clean Prompt
+            for top in tops:
+                for bottom in bottoms:
+                    top_text = f"{top.get('brand','')} {top.get('color_name','')} {top.get('subcategory','')}"
+                    bottom_text = f"{bottom.get('brand','')} {bottom.get('color_name','')} {bottom.get('subcategory','')}"
+                    
+                    top_vec, bottom_vec = embedder.encode([top_text]), embedder.encode([bottom_text])
+                    w_top, w_bot = np.array([[get_warmth_score(top_text)]]), np.array([[get_warmth_score(bottom_text)]])
+                    t_norm = np.array([[temp_norm]])
+                    
+                    X_input = np.hstack([top_vec, bottom_vec, w_top, w_bot, t_norm])
+                    confidence = mlp_model.predict_proba(scaler.transform(X_input))[0][1] 
+                    
+                    if confidence > best_pair_score:
+                        best_pair_score, best_top, best_bottom = confidence, top, bottom
+
+            if best_top: outfit_composition["top"] = f"Your {best_top.get('color_name', '')} {best_top.get('subcategory', '')}"
+            if best_bottom: outfit_composition["bottom"] = f"Your {best_bottom.get('color_name', '')} {best_bottom.get('subcategory', '')}"
+            for placement in ["layer", "footwear"]:
+                structural_rule = best_archetype["components"].get(placement)
+                if structural_rule and structural_rule["subcategory"] != "None":
+                    rule_cat = structural_rule["category"].lower()
+                    matched_item = next((item for item in user_wardrobe if item.get("category", "").lower() == rule_cat and (not structural_rule["colors"] or any(c.lower() in item.get("color_name", "").lower() for c in structural_rule["colors"]))), None)
+                    outfit_composition[placement] = f"Your {matched_item['color_name']} {matched_item['subcategory']}" if matched_item else f"[MISSING: {structural_rule['subcategory']}]"
+
+        else:
+            # Basic Fallback if ML isn't running
+            for placement, structural_rule in best_archetype["components"].items():
+                if structural_rule["subcategory"] == "None": continue
+                rule_cat = structural_rule["category"].lower()
+                matched_item = next((item for item in user_wardrobe if item.get("category", "").lower() == rule_cat and (not structural_rule["colors"] or any(c.lower() in item.get("color_name", "").lower() for c in structural_rule["colors"]))), None)
+                outfit_composition[placement] = f"Your {matched_item['color_name']} {matched_item['subcategory']}" if matched_item else f"[MISSING: {structural_rule['subcategory']}]"
+
+        # 3. GROUNDED GROQ PROMPT (No more poetry)
+        outfit_blueprint_str = json.dumps(outfit_composition, indent=2).replace("{", "{{").replace("}", "}}")
         match_prompt = f"""
-        SYSTEM: You are 'Aura', an elite menswear consultant. Speak with high-end, sophisticated terminology. No emojis. No markdown.
+        SYSTEM: You are 'Aura', a smart wardrobe assistant. Your tone must be modern, direct, practical, and grounded. Do NOT use overly poetic, dramatic, or exaggerated language. Be helpful and concise. No emojis.
         
-        CONTEXT:
-        The user is dressing for: '{request.prompt}'. 
-        The assigned archetype is: '{selected_archetype['style_archetype']}'.
-        The required tone is: {tone}.
+        CONTEXT: 
+        Event: '{request.prompt}'
+        Archetype: '{best_archetype['style_archetype']}'
         
-        BLUEPRINT:
-        {blueprint_json}
-
-        TASK:
-        Acknowledge the specific event '{request.prompt}'. Mention the foundation items found in the BLUEPRINT, then provide 2 concise sentences of actionable styling advice to complete the silhouette.
+        BLUEPRINT (Items chosen by the algorithm): 
+        {outfit_blueprint_str}
+        
+        TASK: 
+        Acknowledge the event in one sentence. State the items from the BLUEPRINT clearly. Provide 1 or 2 practical styling tips to complete the look. Keep the entire response under 4 sentences.
         """
 
-        # 4. GROQ INFERENCE with Presence Penalty to stop repetitive answers
-        chat_completion = groq_client.chat.completions.create(
-            messages=[{"role": "user", "content": match_prompt}],
-            model="llama-3.1-8b-instant", 
-            temperature=0.7,
-            presence_penalty=0.6 
-        )
-        final_text_response = chat_completion.choices[0].message.content
+        chat_completion = groq_client.chat.completions.create(messages=[{"role": "user", "content": match_prompt}], model="llama-3.1-8b-instant", temperature=0.5)
 
         return {
             "success": True,
-            "recommendation": final_text_response,
+            "recommendation": chat_completion.choices[0].message.content,
             "blueprint": outfit_composition,
-            "meta": {"style_archetype": selected_archetype["style_archetype"]}
+            "meta": {"archetype": best_archetype['style_archetype'], "ml_score": str(best_pair_score) if ML_AVAILABLE else "N/A"}
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    # ==========================================
-# NEW ENDPOINTS: CALENDAR INTEGRATION
-# ==========================================
 
-# 1. Schedule/Save an outfit
 @app.post("/api/schedule-outfit")
 async def schedule_outfit(request: RecommendRequest, event_date: str):
-    # First, get the recommendation using your existing engine
     recommendation = await recommend_outfit(request)
-    
-    # Save the planned outfit to the new table
     try:
-        supabase_client.table("outfit_calendar").insert({
-            "event_date": event_date,
-            "event_name": request.prompt,
-            "outfit_blueprint": recommendation["blueprint"]
-        }).execute()
-        
+        supabase_client.table("outfit_calendar").insert({"event_date": event_date, "event_name": request.prompt, "outfit_blueprint": recommendation["blueprint"]}).execute()
         return {"success": True, "data": recommendation}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save to calendar: {str(e)}")
 
-# 2. Retrieve an outfit for a specific date
 @app.get("/api/calendar/{date}")
 async def get_outfit_for_date(date: str):
     try:
-        response = supabase_client.table("outfit_calendar")\
-            .select("*")\
-            .eq("event_date", date)\
-            .execute()
-        
-        if not response.data:
-            return {"success": False, "message": "No outfit planned for this date."}
-            
+        response = supabase_client.table("outfit_calendar").select("*").eq("event_date", date).execute()
+        if not response.data: return {"success": False, "message": "No outfit planned for this date."}
         return {"success": True, "outfit": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Calendar lookup failed: {str(e)}")
