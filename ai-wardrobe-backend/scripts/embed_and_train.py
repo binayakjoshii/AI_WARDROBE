@@ -6,25 +6,22 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, confusion_matrix, accuracy_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from sentence_transformers import SentenceTransformer
 
 PAIRS_CSV = Path("data/pairs.csv")
 MODEL_DIR = Path("models")
-MODEL_PKL = MODEL_DIR / "polyvore_weather_model.pkl"
+MODEL_PKL = MODEL_DIR / "polyvore_weather_model_v2_staging.pkl"
 REPORT_TXT = MODEL_DIR / "training_report.txt"
 EMBED_MODEL = "all-MiniLM-L6-v2" # 22MB, CPU-friendly
 
-# MLP architecture
+# MLP architecture (Optimized for Small Datasets)
 MLP_CONFIG = dict(
-    hidden_layer_sizes=(512, 256, 128),
+    hidden_layer_sizes=(64, 32),
     activation="relu",
-    solver="adam",
-    alpha=1e-4, 
-    learning_rate="adaptive",
-    max_iter=300,
-    early_stopping=True,
-    validation_fraction=0.1,
-    n_iter_no_change=15,
+    solver="lbfgs",
+    alpha=0.1,        # Increased regularization to prevent overfitting on small data
+    max_iter=5000,    # Increased significantly to prevent the convergence timeout
     random_state=42,
     verbose=True
 )
@@ -43,6 +40,11 @@ def embed_items(df: pd.DataFrame, model: SentenceTransformer) -> np.ndarray:
     return np.hstack([tops_vecs, bottoms_vecs])
 
 def build_features(df: pd.DataFrame, embeddings: np.ndarray) -> tuple:
+    print("Compressing text embeddings using PCA...")
+    # Compress the massive 1536 text dimensions down to the 50 most important features
+    pca = PCA(n_components=50, random_state=42)
+    compressed_embeddings = pca.fit_transform(embeddings)
+    
     warmth_top = df["warmth_top"].values.reshape(-1, 1)
     warmth_bottom = df["warmth_bottom"].values.reshape(-1, 1)
 
@@ -51,9 +53,10 @@ def build_features(df: pd.DataFrame, embeddings: np.ndarray) -> tuple:
     temps = np.random.normal(28, 8, len(df)).clip(5, 45)
     temp_norm = (temps / 45.0).reshape(-1, 1) # normalise to [0,1]
 
-    X = np.hstack([embeddings, warmth_top, warmth_bottom, temp_norm])
-    print(f"Feature matrix shape: {X.shape}")
-    return X, temps
+    # Stack the compressed features with the warmth and weather
+    X = np.hstack([compressed_embeddings, warmth_top, warmth_bottom, temp_norm])
+    print(f"Feature matrix shape after PCA: {X.shape}")
+    return X, temps, pca
 
 def train(X, y):
     print("\nSplitting train/test (80/20)...")
@@ -87,11 +90,12 @@ def train(X, y):
     print(f"Report saved to {REPORT_TXT}")
     return mlp, scaler, auc
 
-def save_model(mlp, scaler, embed_model_name, feature_shape):
+def save_model(mlp, scaler, pca, embed_model_name, feature_shape):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     bundle = {
         "mlp": mlp,
         "scaler": scaler,
+        "pca": pca, # Saving PCA so main.py can compress user clothes during live inference
         "embed_model_name": embed_model_name,
         "feature_shape": feature_shape,
         "warmth_keywords": {
@@ -114,9 +118,13 @@ if __name__ == "__main__":
     embedder = SentenceTransformer(EMBED_MODEL)
     
     embeddings = embed_items(df, embedder)
-    X, temps = build_features(df, embeddings)
+    
+    # Unpack the PCA object along with X and temps
+    X, temps, pca_model = build_features(df, embeddings)
     
     mlp, scaler, auc = train(X, y)
-    save_model(mlp, scaler, EMBED_MODEL, X.shape[1])
+    
+    # Pass the PCA model into the save function
+    save_model(mlp, scaler, pca_model, EMBED_MODEL, X.shape[1])
     
     print(f"\nDone! AUC = {auc:.3f}")

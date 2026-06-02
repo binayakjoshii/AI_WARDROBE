@@ -5,6 +5,7 @@ import time
 import requests
 import joblib
 import numpy as np
+import random
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
@@ -34,13 +35,14 @@ groq_client = Groq(api_key=GROQ_KEY)
 ML_AVAILABLE = False
 try:
     print("Loading Custom ML Model into RAM...")
-    model_bundle = joblib.load("models/polyvore_weather_model.pkl")
+    model_bundle = joblib.load("models/polyvore_weather_model_v2_staging.pkl")
     mlp_model = model_bundle["mlp"]
     scaler = model_bundle["scaler"]
+    pca_model = model_bundle["pca"] 
     embedder = SentenceTransformer(model_bundle["embed_model_name"])
     WARMTH_MAP = model_bundle["warmth_keywords"]
     ML_AVAILABLE = True
-    print("✅ AI Stylist Model Loaded Successfully!")
+    print("✅ AI Stylist Model (V2 with PCA) Loaded Successfully!")
 except Exception as e:
     print(f"⚠️ ML Model not found or failed to load. Using basic rule fallback. Error: {e}")
 
@@ -256,30 +258,38 @@ async def recommend_outfit(request: RecommendRequest):
 
         db_response = supabase_client.table("clothing_items").select("*").eq("wear_status", "clean").execute()
         user_wardrobe = db_response.data if db_response.data else []
+        random.shuffle(user_wardrobe) # Shuffles the deck to allow item cycling
 
-        # 1. FIXED SCORING LOGIC (Keywords beat Temperature)
+        # 1. FIXED SCORING LOGIC (Keywords beat Temperature + Rain Toggle Support)
         best_archetype = MASTER_FASHION_RULES[0] # Default to Casual
-        highest_score = 0 
+        highest_score = -1 
         
         for archetype in MASTER_FASHION_RULES:
             score = 0
+            
+            # Real-Time Dashboard Rain Toggle Force Override
+            if request.is_raining and archetype["style_archetype"] == "Rainy / Monsoon":
+                score += 50
+                
             if archetype["ideal_temp_range"][0] <= request.current_temp <= archetype["ideal_temp_range"][1]: 
                 score += 0.5 # Weather is a minor tie-breaker
+                
             for kw in archetype.get("keywords", []):
                 if kw in request.prompt.lower(): 
                     score += 5 # Keywords are the primary decider
+                    
             if score > highest_score:
                 highest_score = score
                 best_archetype = archetype
 
         outfit_composition = {}
+        best_pair_score = -1
         
-        # 2. MACHINE LEARNING EVALUATION
+        # 2. MACHINE LEARNING EVALUATION (Now with PCA Compression)
         if ML_AVAILABLE and len(user_wardrobe) > 1:
-            tops = [item for item in user_wardrobe if item.get("category", "").lower() in ["tops", "top", "shirt"]]
-            bottoms = [item for item in user_wardrobe if item.get("category", "").lower() in ["bottoms", "bottom", "pants", "jeans"]]
+            tops = [item for item in user_wardrobe if item.get("category", "").lower().strip() in ["tops", "top", "shirt"]]
+            bottoms = [item for item in user_wardrobe if item.get("category", "").lower().strip() in ["bottoms", "bottom", "pants", "jeans"]]
             
-            best_pair_score = -1
             best_top, best_bottom = None, None
             temp_norm = np.clip(request.current_temp, 5, 45) / 45.0
 
@@ -289,10 +299,14 @@ async def recommend_outfit(request: RecommendRequest):
                     bottom_text = f"{bottom.get('brand','')} {bottom.get('color_name','')} {bottom.get('subcategory','')}"
                     
                     top_vec, bottom_vec = embedder.encode([top_text]), embedder.encode([bottom_text])
+                    
+                    raw_embeddings = np.hstack([top_vec, bottom_vec])
+                    compressed_embeddings = pca_model.transform(raw_embeddings)
+                    
                     w_top, w_bot = np.array([[get_warmth_score(top_text)]]), np.array([[get_warmth_score(bottom_text)]])
                     t_norm = np.array([[temp_norm]])
                     
-                    X_input = np.hstack([top_vec, bottom_vec, w_top, w_bot, t_norm])
+                    X_input = np.hstack([compressed_embeddings, w_top, w_bot, t_norm])
                     confidence = mlp_model.predict_proba(scaler.transform(X_input))[0][1] 
                     
                     if confidence > best_pair_score:
@@ -300,22 +314,26 @@ async def recommend_outfit(request: RecommendRequest):
 
             if best_top: outfit_composition["top"] = f"Your {best_top.get('color_name', '')} {best_top.get('subcategory', '')}"
             if best_bottom: outfit_composition["bottom"] = f"Your {best_bottom.get('color_name', '')} {best_bottom.get('subcategory', '')}"
+            
+            # Architectural Layering Injection Loop
             for placement in ["layer", "footwear"]:
                 structural_rule = best_archetype["components"].get(placement)
                 if structural_rule and structural_rule["subcategory"] != "None":
-                    rule_cat = structural_rule["category"].lower()
-                    matched_item = next((item for item in user_wardrobe if item.get("category", "").lower() == rule_cat and (not structural_rule["colors"] or any(c.lower() in item.get("color_name", "").lower() for c in structural_rule["colors"]))), None)
-                    outfit_composition[placement] = f"Your {matched_item['color_name']} {matched_item['subcategory']}" if matched_item else f"[MISSING: {structural_rule['subcategory']}]"
+                    rule_cat = structural_rule["category"].lower().strip()
+                    matched_item = next((item for item in user_wardrobe if item.get("category", "").lower().strip() == rule_cat and (not structural_rule["colors"] or any(c.lower() in item.get("color_name", "").lower() for c in structural_rule["colors"]))), None)
+                    if matched_item:
+                        outfit_composition[placement] = f"Your {matched_item['color_name']} {matched_item['subcategory']}"
 
         else:
             # Basic Fallback if ML isn't running
             for placement, structural_rule in best_archetype["components"].items():
                 if structural_rule["subcategory"] == "None": continue
-                rule_cat = structural_rule["category"].lower()
-                matched_item = next((item for item in user_wardrobe if item.get("category", "").lower() == rule_cat and (not structural_rule["colors"] or any(c.lower() in item.get("color_name", "").lower() for c in structural_rule["colors"]))), None)
-                outfit_composition[placement] = f"Your {matched_item['color_name']} {matched_item['subcategory']}" if matched_item else f"[MISSING: {structural_rule['subcategory']}]"
+                rule_cat = structural_rule["category"].lower().strip()
+                matched_item = next((item for item in user_wardrobe if item.get("category", "").lower().strip() == rule_cat and (not structural_rule["colors"] or any(c.lower() in item.get("color_name", "").lower() for c in structural_rule["colors"]))), None)
+                if matched_item:
+                    outfit_composition[placement] = f"Your {matched_item['color_name']} {matched_item['subcategory']}"
 
-        # 3. GROUNDED GROQ PROMPT (No more poetry)
+        # 3. GROUNDED GROQ PROMPT (WITH PRODUCTION FAILSAFE)
         outfit_blueprint_str = json.dumps(outfit_composition, indent=2).replace("{", "{{").replace("}", "}}")
         match_prompt = f"""
         SYSTEM: You are 'Aura', a smart wardrobe assistant. Your tone must be modern, direct, practical, and grounded. Do NOT use overly poetic, dramatic, or exaggerated language. Be helpful and concise. No emojis.
@@ -331,13 +349,34 @@ async def recommend_outfit(request: RecommendRequest):
         Acknowledge the event in one sentence. State the items from the BLUEPRINT clearly. Provide 1 or 2 practical styling tips to complete the look. Keep the entire response under 4 sentences.
         """
 
-        chat_completion = groq_client.chat.completions.create(messages=[{"role": "user", "content": match_prompt}], model="llama-3.1-8b-instant", temperature=0.5)
+        final_recommendation = ""
+        try:
+            # Strict 4.0 second cloud timeout limit to catch bad university wifi cuts
+            chat_completion = groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": match_prompt}], 
+                model="llama-3.1-8b-instant", 
+                temperature=0.5,
+                timeout=4.0
+            )
+            final_recommendation = chat_completion.choices[0].message.content
+        except Exception as e:
+            print(f"⚠️ Groq API Network Fallback Triggered: {e}")
+            top_text = outfit_composition.get('top', 'selected top').replace('Your ', '').lower()
+            bottom_text = outfit_composition.get('bottom', 'selected pants').replace('Your ', '').lower()
+            layer_text = outfit_composition.get('layer', '').replace('Your ', '').lower()
+            
+            fallback_msg = f"Got it. For your {request.prompt}, I recommend a clean {best_archetype['style_archetype']} look. Try pairing your {top_text} with your {bottom_text}."
+            if layer_text:
+                fallback_msg += f" Layer it up with your {layer_text} to match the current conditions."
+            else:
+                fallback_msg += " It matches your current weather conditions perfectly."
+            final_recommendation = fallback_msg
 
         return {
             "success": True,
-            "recommendation": chat_completion.choices[0].message.content,
+            "recommendation": final_recommendation,
             "blueprint": outfit_composition,
-            "meta": {"archetype": best_archetype['style_archetype'], "ml_score": str(best_pair_score) if ML_AVAILABLE else "N/A"}
+            "meta": {"archetype": best_archetype['style_archetype'], "ml_score": str(best_pair_score) if ML_AVAILABLE and best_pair_score != -1 else "N/A"}
         }
 
     except Exception as e:
@@ -363,4 +402,4 @@ async def get_outfit_for_date(date: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8002)
